@@ -5,10 +5,17 @@ A REST API for a poultry farmer in Kiambu with three sheds. Log each shed's
 daily egg count, then pull all records with running totals - no more adding
 up WhatsApp messages on Saturday.
 
+Pages:
+    /                 web form: log a record and see all records + totals update live
+
 Endpoints:
     POST /api/eggs    log a daily record: {"shed": "A", "date": "2026-11-09", "count": 412}
     GET  /api/eggs    all records (oldest first) with a running total, plus totals per shed
                       optional filters: ?shed=A  ?from=2026-11-09  ?to=2026-11-15
+
+CORS: the web page is served by this same Flask app, so it needs no CORS.
+If a separate frontend (e.g. VS Code Live Server on port 5500) calls the API,
+list its address in ALLOWED_ORIGINS in .env, comma-separated.
 
 Optional security: set EGG_API_KEY in a .env file and every request must send
 the header  X-API-Key: <your key>.
@@ -22,7 +29,8 @@ import os
 from datetime import date, datetime
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
+from flask_cors import CORS
 
 load_dotenv()
 app = Flask(__name__)
@@ -30,6 +38,10 @@ app = Flask(__name__)
 SHEDS = ["A", "B", "C"]          # the farm's three sheds
 MAX_DAILY_COUNT = 5000           # sanity limit per shed per day
 API_KEY = os.getenv("EGG_API_KEY", "").strip()
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if ALLOWED_ORIGINS:
+    # Only these other websites may call the API from a browser - never "*" in production.
+    CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 
 records = []                     # in-memory store (resets when the server restarts)
 next_id = 1
@@ -59,6 +71,14 @@ def normalise_shed(value):
 def check_api_key():
     if API_KEY and request.path.startswith("/api/") and request.headers.get("X-API-Key") != API_KEY:
         return error("Invalid or missing API key. Send it in the X-API-Key header.", 401)
+
+
+# ---------------------------------------------------------------- pages
+
+@app.route("/")
+def home():
+    return render_template("index.html", sheds=SHEDS, today=date.today().isoformat(),
+                           max_count=MAX_DAILY_COUNT)
 
 
 # ---------------------------------------------------------------- endpoints
@@ -132,7 +152,7 @@ def list_eggs():
 
 @app.errorhandler(404)
 def not_found(_err):
-    return error("Not found. Use /api/eggs", 404)
+    return error("Not found. Open / for the web page, or use /api/eggs", 404)
 
 
 @app.errorhandler(405)

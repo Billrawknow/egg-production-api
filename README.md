@@ -2,7 +2,20 @@
 
 A REST API for a poultry farmer in Kiambu with three sheds (A, B and C). Each day he logs how many eggs each shed produced. At the end of the week, one request returns every record with a running total and the total per shed. It replaces sending himself numbers on WhatsApp and adding them up by hand on Saturday.
 
-AI Masterclass 2, Week 4, Day 17: building a REST API.
+AI Masterclass 2, Week 4: Day 17 (REST API) and Day 18 (connecting a browser frontend to the Flask backend).
+
+![Web form](screenshots/web-form.png)
+
+## Web interface
+
+Open **http://127.0.0.1:5000** with the server running. The farm manager picks the shed, the date and the egg count, then clicks **Submit**:
+
+1. JavaScript `fetch()` sends the record to `POST /api/eggs`.
+2. If it's saved, the page calls `GET /api/eggs` and redraws the table and the per-shed totals. **There's no page reload,** and the new row is highlighted.
+3. Problems show as a message under the form, never a blank page. That covers an empty count, a non-whole number, a shed already logged for that day, and the server being down.
+4. While saving, the button shows **"Saving..."** and is disabled, so a record can't be submitted twice.
+
+It works on a phone screen too, so the manager can log counts from the shed.
 
 ## Pricing
 
@@ -52,6 +65,21 @@ Optional filters:
 }
 ```
 
+## Who could use a tool like this in Kenya, and at what price
+
+The same pattern (log a daily number per unit, then see running totals) fits many small businesses:
+
+| Business | What they'd log | Setup | Monthly |
+|---|---|---|---|
+| Poultry farms (layers) | Eggs per shed per day, mortalities | KES 15,000 | KES 2,000 |
+| Dairy farmers and milk collection centres | Litres per cow or per farmer per day | KES 15,000 | KES 2,000 |
+| Tea and coffee out-growers and buying centres | Kilos delivered per farmer per day | KES 20,000 | KES 2,500 |
+| Water kiosks and boreholes | Jerricans or litres sold per day | KES 10,000 | KES 1,500 |
+| Bakeries and small factories | Units produced per line per shift | KES 15,000 | KES 2,000 |
+| Fish ponds and greenhouses | Feed used and harvest per pond or house | KES 12,000 | KES 1,500 |
+
+The setup price covers customising the units and fields, hosting it online and training staff. The monthly fee covers hosting, backups and support. For a farm producing about 1,200 eggs a day, catching one shed's drop in production a few days earlier easily pays for the monthly fee.
+
 ## Setup and run
 
 ```bash
@@ -59,7 +87,13 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The API runs at `http://127.0.0.1:5000/api/eggs`.
+Open **http://127.0.0.1:5000** for the web form. The API itself is at `http://127.0.0.1:5000/api/eggs`.
+
+## Testing with Postman
+
+1. In Postman, click **Import** and choose `egg-production-api.postman_collection.json`.
+2. With the server running, open the collection and click **Send** on each request from top to bottom: 4 valid records, then 5 that should be rejected, then the GET requests.
+3. Each request's name shows the status code to expect, e.g. *(expect 201)*.
 
 ## Testing with curl
 
@@ -78,13 +112,21 @@ curl http://127.0.0.1:5000/api/eggs
 curl "http://127.0.0.1:5000/api/eggs?from=2026-11-09&to=2026-11-15"
 ```
 
+## CORS
+
+The web page is served by the same Flask app as the API, so the browser treats them as one site and **no CORS is needed**. CORS only matters if a page hosted somewhere else calls this API (e.g. VS Code Live Server on port 5500, or a separate website). To allow that, list those addresses in `.env`:
+```
+ALLOWED_ORIGINS=http://127.0.0.1:5500
+```
+Any other website is blocked by the browser. Don't use `CORS(app)` with all origins allowed on a live server.
+
 ## Optional API key
 
 To stop anyone with the URL from reading or adding records, create a `.env` file:
 ```
 EGG_API_KEY=a-long-random-string
 ```
-Every request must then send the header `X-API-Key: a-long-random-string`, or it gets **401 Unauthorized**. To run the test script with a key:
+Every API request must then send the header `X-API-Key: a-long-random-string`, or it gets **401 Unauthorized**. The key is meant for scripts and Postman. Leave it unset when using the web page, because putting a secret key in browser JavaScript would expose it to anyone who opens the page. A real deployment would use a login instead. To run the test script with a key:
 ```bash
 API_KEY=a-long-random-string bash test_requests.sh
 ```

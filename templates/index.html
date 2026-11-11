@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Egg Production Log</title>
+  <style>
+    :root { --bg:#f5f4ef; --card:#fff; --text:#1f2421; --muted:#6b726c; --line:#e3e1d8;
+            --accent:#2f6b3a; --accent-text:#fff; --err-bg:#fdecec; --err:#a42a2a; --ok-bg:#e9f5ec; --ok:#24603a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#141714; --card:#1d221e; --text:#e8ece8; --muted:#9aa49c; --line:#2c332d;
+              --accent:#6fbf7e; --accent-text:#0f1a12; --err-bg:#3a1e1e; --err:#ff9a9a; --ok-bg:#1d3324; --ok:#8fdba0; }
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg);
+           color:var(--text); line-height:1.5; }
+    main { max-width:720px; margin:0 auto; padding:28px 16px 48px; }
+    h1 { font-size:1.5rem; margin:0; }
+    .sub { color:var(--muted); margin:2px 0 20px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+    form { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:10px; align-items:end; }
+    label { display:block; font-size:.85rem; color:var(--muted); margin-bottom:4px; }
+    input, select { width:100%; padding:10px 12px; font-size:1rem; border:1px solid var(--line); border-radius:9px;
+                    background:var(--card); color:var(--text); }
+    input:focus, select:focus { outline:2px solid var(--accent); outline-offset:1px; }
+    button { padding:11px 18px; font-size:1rem; font-weight:600; border:0; border-radius:9px; background:var(--accent);
+             color:var(--accent-text); cursor:pointer; white-space:nowrap; }
+    button:disabled { opacity:.6; cursor:wait; }
+    .msg { margin-top:12px; padding:10px 12px; border-radius:9px; }
+    .msg.err { background:var(--err-bg); color:var(--err); }
+    .msg.ok { background:var(--ok-bg); color:var(--ok); }
+    .hidden { display:none; }
+    .totals { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .total { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
+    .total .label { color:var(--muted); font-size:.85rem; }
+    .total .value { font-size:1.4rem; font-weight:700; font-variant-numeric:tabular-nums; }
+    .total.all { border-color:var(--accent); }
+    table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
+    th { font-size:.85rem; color:var(--muted); font-weight:600; }
+    td.num, th.num { text-align:right; }
+    tr.new td { background:var(--ok-bg); }
+    .empty { color:var(--muted); padding:12px 0; }
+    @media (max-width:560px) {
+      form { grid-template-columns:1fr 1fr; }
+      form button { grid-column:1 / -1; }
+      .totals { grid-template-columns:1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Egg Production Log</h1>
+  <p class="sub">Log each shed's daily count. The table and totals update instantly.</p>
+
+  <div class="card">
+    <form id="egg-form" novalidate>
+      <div>
+        <label for="shed">Shed</label>
+        <select id="shed" required>
+          {% for s in sheds %}<option value="{{ s }}">Shed {{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="date">Date</label>
+        <input id="date" type="date" value="{{ today }}" max="{{ today }}" required>
+      </div>
+      <div>
+        <label for="count">Eggs collected</label>
+        <input id="count" type="number" min="0" max="{{ max_count }}" step="1" inputmode="numeric"
+               placeholder="e.g. 412" required>
+      </div>
+      <button id="submit-btn" type="submit">Submit</button>
+    </form>
+    <div id="msg" class="msg hidden" role="status"></div>
+  </div>
+
+  <div class="totals" id="totals" aria-live="polite"></div>
+
+  <div class="card" style="margin-top:16px">
+    <table>
+      <thead><tr><th>Date</th><th>Shed</th><th class="num">Eggs</th><th class="num">Running total</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="4" class="empty">Loading records...</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+  const SHEDS = {{ sheds | tojson }};
+  const form = document.getElementById("egg-form");
+  const btn = document.getElementById("submit-btn");
+  const msg = document.getElementById("msg");
+  const rowsEl = document.getElementById("rows");
+  const totalsEl = document.getElementById("totals");
+  const num = (n) => Number(n).toLocaleString("en-KE");
+
+  function showMessage(text, kind) {
+    msg.textContent = text;
+    msg.className = "msg " + kind;
+  }
+
+  async function loadRecords(highlightId) {
+    try {
+      const response = await fetch("/api/eggs");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Couldn't load records.");
+      renderTotals(data.totals);
+      renderRows(data.records, highlightId);
+    } catch (err) {
+      rowsEl.innerHTML = "";
+      const tr = rowsEl.insertRow();
+      const td = tr.insertCell();
+      td.colSpan = 4; td.className = "empty";
+      td.textContent = err instanceof TypeError ? "Can't reach the server. Is app.py running?" : err.message;
+    }
+  }
+
+  function renderTotals(totals) {
+    const cards = SHEDS.map((s) => [`Shed ${s}`, totals.by_shed[s] || 0, ""]);
+    cards.push(["All sheds", totals.all_sheds, "all"]);
+    totalsEl.innerHTML = "";
+    for (const [label, value, cls] of cards) {
+      const div = document.createElement("div");
+      div.className = "total " + cls;
+      div.innerHTML = '<div class="label"></div><div class="value"></div>';
+      div.querySelector(".label").textContent = label;
+      div.querySelector(".value").textContent = num(value);
+      totalsEl.appendChild(div);
+    }
+  }
+
+  function renderRows(records, highlightId) {
+    rowsEl.innerHTML = "";
+    if (!records.length) {
+      const td = rowsEl.insertRow().insertCell();
+      td.colSpan = 4; td.className = "empty";
+      td.textContent = "No records yet. Log the first count above.";
+      return;
+    }
+    for (const r of records) {
+      const tr = rowsEl.insertRow();
+      if (r.id === highlightId) tr.className = "new";
+      tr.insertCell().textContent = r.date;
+      tr.insertCell().textContent = "Shed " + r.shed;
+      const c = tr.insertCell(); c.className = "num"; c.textContent = num(r.count);
+      const t = tr.insertCell(); t.className = "num"; t.textContent = num(r.running_total);
+    }
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const shed = document.getElementById("shed").value;
+    const date = document.getElementById("date").value;
+    const countText = document.getElementById("count").value.trim();
+
+    if (!date || countText === "") {
+      showMessage("Please fill in the date and the number of eggs.", "err");
+      return;
+    }
+    if (!/^\d+$/.test(countText)) {
+      showMessage("Eggs collected must be a whole number, e.g. 412.", "err");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+    msg.className = "msg hidden";
+    try {
+      const response = await fetch("/api/eggs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shed, date, count: Number(countText) }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        showMessage(data.error || "The record wasn't saved.", "err");
+        return;
+      }
+      showMessage(`Saved: Shed ${data.shed}, ${data.date}, ${num(data.count)} eggs.`, "ok");
+      document.getElementById("count").value = "";
+      await loadRecords(data.id);
+    } catch (err) {
+      showMessage("Can't reach the server. Check that app.py is running, then try again.", "err");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Submit";
+    }
+  });
+
+  loadRecords();
+</script>
+</body>
+</html>
