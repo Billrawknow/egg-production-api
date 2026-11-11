@@ -2,7 +2,16 @@
 
 A REST API for a poultry farmer in Kiambu with three sheds (A, B and C). Each day he logs how many eggs each shed produced. At the end of the week, one request returns every record with a running total and the total per shed. It replaces sending himself numbers on WhatsApp and adding them up by hand on Saturday.
 
-AI Masterclass 2, Week 4: Day 17 (REST API) and Day 18 (connecting a browser frontend to the Flask backend).
+AI Masterclass 2, Week 4: Day 17 (REST API), Day 18 (browser frontend) and Day 19 (deployment).
+
+## Live Demo
+
+**https://egg-production-api.onrender.com** *(replace with your Render URL)*
+
+- Web form: open the link above
+- API: `https://egg-production-api.onrender.com/api/eggs`
+
+It runs on Render's free plan, which goes to sleep after 15 minutes without visitors. The **first visit after a quiet spell can take up to a minute** to load, and after that it's fast.
 
 ![Web form](screenshots/web-form.png)
 
@@ -131,8 +140,28 @@ Every API request must then send the header `X-API-Key: a-long-random-string`, o
 API_KEY=a-long-random-string bash test_requests.sh
 ```
 
+## Deployment (Render)
+
+The app is deployed on [Render](https://render.com) as a free Web Service connected to this GitHub repo. **Every push to `main` re-deploys automatically.**
+
+| Setting | Value |
+|---|---|
+| Runtime | Python 3 |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `gunicorn app:app --workers 1 --threads 4` |
+| Instance type | Free |
+
+Notes on the production setup:
+- **gunicorn** is the production web server. `python app.py` uses Flask's development server, which isn't safe for live use. gunicorn reads the `PORT` that Render provides automatically.
+- **`--workers 1`** matters because records are kept in memory. With several workers, each would have its own separate list, and a record saved by one worker wouldn't show up in another's GET. `--threads 4` still lets it handle several visitors at once.
+- **Farm time, not server time.** Render's servers run on UTC, three hours behind Kenya. The app works out "today" in Kenyan time (`FARM_UTC_OFFSET_HOURS`, default 3), so the manager can log today's count at 1 AM without it being rejected as a future date.
+- **Environment variables** are set in Render's **Environment** tab, never in code. This app needs none to run. `EGG_API_KEY` and `ALLOWED_ORIGINS` are optional (see below), and secrets must never be committed to GitHub.
+
+gunicorn doesn't run on Windows. On your own computer, keep using `python app.py`.
+
 ## Limitations of this version
 
-- **Data is held in memory,** so it's lost when the server restarts. A real deployment for the farmer would save records to a database (e.g. SQLite).
+- **Data is held in memory,** so it's lost whenever the server restarts. On Render's free plan that happens on every deploy and whenever the app goes to sleep. That's fine for a demo. A paying farmer needs a real database, such as Render's PostgreSQL or a hosted SQLite service, so records survive restarts.
+- **The live demo has no login,** so anyone with the link can add records. A real deployment needs user accounts.
 - Records can't be edited or deleted yet. A `PUT /api/eggs/<id>` endpoint would be the next step for correcting mistakes.
 - IDs come from a counter, not `len(records) + 1`, so they stay unique even after deletes are added.

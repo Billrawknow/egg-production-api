@@ -20,13 +20,16 @@ list its address in ALLOWED_ORIGINS in .env, comma-separated.
 Optional security: set EGG_API_KEY in a .env file and every request must send
 the header  X-API-Key: <your key>.
 
-Usage:
+Usage (local):
     pip install -r requirements.txt
     python app.py
+
+Production (Render):
+    gunicorn app:app --workers 1 --threads 4
 """
 
 import os
-from datetime import date, datetime
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
@@ -37,6 +40,9 @@ app = Flask(__name__)
 
 SHEDS = ["A", "B", "C"]          # the farm's three sheds
 MAX_DAILY_COUNT = 5000           # sanity limit per shed per day
+# The farm is in Kenya (UTC+3, no daylight saving). Servers like Render run on UTC,
+# so "today" must be worked out in farm time, not server time.
+FARM_TZ = timezone(timedelta(hours=float(os.getenv("FARM_UTC_OFFSET_HOURS", "3"))))
 API_KEY = os.getenv("EGG_API_KEY", "").strip()
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if ALLOWED_ORIGINS:
@@ -48,6 +54,10 @@ next_id = 1
 
 
 # ---------------------------------------------------------------- helpers
+
+def farm_today():
+    return datetime.now(FARM_TZ).date()
+
 
 def error(message, status):
     return jsonify({"error": message}), status
@@ -77,7 +87,7 @@ def check_api_key():
 
 @app.route("/")
 def home():
-    return render_template("index.html", sheds=SHEDS, today=date.today().isoformat(),
+    return render_template("index.html", sheds=SHEDS, today=farm_today().isoformat(),
                            max_count=MAX_DAILY_COUNT)
 
 
@@ -99,7 +109,7 @@ def log_eggs():
         day = parse_date(data["date"], "date")
     except ValueError as err:
         return error(str(err), 400)
-    if day > date.today():
+    if day > farm_today():
         return error("The date can't be in the future.", 400)
 
     count = data["count"]
@@ -161,4 +171,5 @@ def method_not_allowed(_err):
 
 
 if __name__ == "__main__":
-    app.run(debug=os.getenv("FLASK_DEBUG") == "1")
+    # Local development only. In production (Render), gunicorn starts the app instead.
+    app.run(port=int(os.getenv("PORT", "5000")), debug=os.getenv("FLASK_DEBUG") == "1")
